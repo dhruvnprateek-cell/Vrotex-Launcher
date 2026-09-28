@@ -110,20 +110,55 @@ jobs:
           if (-not (Test-Path -LiteralPath $cachePath)) {
             throw "CMake did not create build/CMakeCache.txt."
           }
-          $cache = Get-Content -LiteralPath $cachePath -Raw
-          $requiredCachePatterns = @(
-            '(?m)^CMAKE_GENERATOR:INTERNAL=Visual Studio 17 2022$',
-            '(?m)^CMAKE_GENERATOR_PLATFORM:INTERNAL=x64$',
-            '(?m)^CMAKE_GENERATOR_TOOLSET:INTERNAL=v143$',
-            '(?m)^VCPKG_TARGET_TRIPLET:STRING=x64-windows$',
-            '(?m)^CMAKE_CONFIGURATION_TYPES:[^=]*=[^\r\n]*Release',
-            '(?m)^Qt6_DIR:PATH=.*6\.10\.2.*msvc2022_64'
-          )
-          foreach ($pattern in $requiredCachePatterns) {
-            if ($cache -notmatch $pattern) {
-              throw "CMake cache did not satisfy the required x64/Release/Qt configuration check: $pattern"
+          $cacheValues = @{}
+          foreach ($line in [System.IO.File]::ReadAllLines($cachePath)) {
+            if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith("#") -or $line.StartsWith("//")) {
+              continue
             }
+            $typeSeparator = $line.IndexOf(":")
+            $valueSeparator = $line.IndexOf("=")
+            if ($typeSeparator -le 0 -or $valueSeparator -le $typeSeparator) {
+              continue
+            }
+            $name = $line.Substring(0, $typeSeparator)
+            $value = $line.Substring($valueSeparator + 1).Trim()
+            $cacheValues[$name] = $value
           }
+          $requiredCacheValues = @(
+            @{ Name = "CMAKE_GENERATOR"; Expected = "Visual Studio 17 2022" },
+            @{ Name = "CMAKE_GENERATOR_PLATFORM"; Expected = "x64" },
+            @{ Name = "CMAKE_GENERATOR_TOOLSET"; Expected = "v143" },
+            @{ Name = "VCPKG_TARGET_TRIPLET"; Expected = "x64-windows" }
+          )
+          foreach ($requiredCacheValue in $requiredCacheValues) {
+            $name = $requiredCacheValue.Name
+            $expected = $requiredCacheValue.Expected
+            if (-not $cacheValues.ContainsKey($name)) {
+              throw "CMake cache is missing '$name'; expected '$expected'."
+            }
+            $actual = $cacheValues[$name]
+            if ($actual -cne $expected) {
+              throw "CMake cache reports '$name=$actual'; expected '$name=$expected'."
+            }
+            Write-Host "$name=$actual"
+          }
+          if (-not $cacheValues.ContainsKey("CMAKE_CONFIGURATION_TYPES")) {
+            throw "CMake cache is missing CMAKE_CONFIGURATION_TYPES; expected Release."
+          }
+          $configurationTypes = @($cacheValues["CMAKE_CONFIGURATION_TYPES"] -split ";" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+          if ($configurationTypes -notcontains "Release") {
+            throw "CMake configurations do not include Release; found '$($configurationTypes -join ', ')'."
+          }
+          Write-Host "CMAKE_CONFIGURATION_TYPES=$($configurationTypes -join ';')"
+          if (-not $cacheValues.ContainsKey("Qt6_DIR")) {
+            throw "CMake cache is missing Qt6_DIR; expected pinned Qt 6.10.2 MSVC 2022 x64."
+          }
+          $qt6Dir = $cacheValues["Qt6_DIR"]
+          $normalizedQt6Dir = $qt6Dir.Replace('\', '/')
+          if ($normalizedQt6Dir -notmatch '(?i)(^|/)6\.10\.2/msvc2022_64(/|$)') {
+            throw "CMake cache reports Qt6_DIR='$qt6Dir'; expected pinned Qt 6.10.2 MSVC 2022 x64."
+          }
+          Write-Host "Qt6_DIR=$qt6Dir"
           if ($env:BUILD_TYPE -ne "Release") {
             throw "BUILD_TYPE must be Release, not $env:BUILD_TYPE."
           }
