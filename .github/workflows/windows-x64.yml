@@ -69,8 +69,18 @@ jobs:
           if ($env:PROCESSOR_ARCHITECTURE -ne "AMD64") {
             throw "Expected a 64-bit AMD64 PowerShell process; got $env:PROCESSOR_ARCHITECTURE."
           }
-          if ($env:VSCMD_ARG_TGT_ARCH -ne "amd64") {
-            throw "MSVC developer environment is not targeting amd64: $env:VSCMD_ARG_TGT_ARCH"
+          $msvcTargetArch = if ($env:VSCMD_ARG_TGT_ARCH) {
+            $env:VSCMD_ARG_TGT_ARCH.Trim().ToLowerInvariant()
+          } else {
+            ""
+          }
+          if ($msvcTargetArch -notin @("x64", "amd64")) {
+            $reportedMsvcTargetArch = if ([string]::IsNullOrWhiteSpace($env:VSCMD_ARG_TGT_ARCH)) {
+              "<unset>"
+            } else {
+              $env:VSCMD_ARG_TGT_ARCH
+            }
+            throw "MSVC developer environment has invalid target architecture '$reportedMsvcTargetArch'; expected x64 or amd64."
           }
           if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
             throw "The Visual Studio 2022 x64 compiler is not on PATH."
