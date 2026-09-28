@@ -1,0 +1,7 @@
+Copyright 2020 The Inter Project Authors (https://github.com/rsms/inter)
+
+This Font Software is licensed under the SIL Open Font License, Version 1.1.
+The full license text is available at https://openfontlicense.org/ and in the
+Inter project repository. Inter is bundled as an application resource; users
+may use, modify, and redistribute it under the terms of the SIL Open Font
+License.

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Vortex Launcher">
+  <defs>
+    <linearGradient id="bg" x1=".08" y1=".06" x2=".92" y2=".96">
+      <stop offset="0" stop-color="#202642"/>
+      <stop offset="1" stop-color="#101522"/>
+    </linearGradient>
+    <linearGradient id="vortex" x1=".18" y1=".15" x2=".84" y2=".86">
+      <stop offset="0" stop-color="#95f4d3"/>
+      <stop offset=".52" stop-color="#71d8e8"/>
+      <stop offset="1" stop-color="#8a82ff"/>
+    </linearGradient>
+    <radialGradient id="glow"><stop stop-color="#7186ff" stop-opacity=".28"/><stop offset="1" stop-color="#7186ff" stop-opacity="0"/></radialGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="118" fill="url(#bg)"/>
+  <circle cx="257" cy="250" r="185" fill="url(#glow)"/>
+  <path d="M157 144c20-26 55-43 96-43 70 0 124 43 124 99 0 48-40 83-93 83-39 0-72-22-72-55 0-24 21-42 47-42 20 0 36 11 43 27" fill="none" stroke="url(#vortex)" stroke-width="25" stroke-linecap="round"/>
+  <path d="M352 370c-20 26-55 43-96 43-70 0-124-43-124-99 0-48 40-83 93-83 39 0 72 22 72 55 0 24-21 42-47 42-20 0-36-11-43-27" fill="none" stroke="url(#vortex)" stroke-width="25" stroke-linecap="round"/>
+  <path d="M198 185c-14 19-21 41-21 66 0 29 11 53 31 71M314 327c14-19 21-41 21-66 0-29-11-53-31-71" fill="none" stroke="#e6fff8" stroke-opacity=".82" stroke-width="12" stroke-linecap="round"/>
+  <circle cx="256" cy="256" r="11" fill="#f0fff9"/>
+</svg>

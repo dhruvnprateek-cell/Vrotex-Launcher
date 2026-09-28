@@ -1,0 +1,230 @@
+name: Windows x64 Build
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - release-11.x
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: windows-x64-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build_windows_x64:
+    name: Build, test, and package (MSVC x64 Release)
+    runs-on: windows-2022
+    timeout-minutes: 240
+    permissions:
+      contents: read
+
+    defaults:
+      run:
+        shell: pwsh
+
+    env:
+      ARTIFACT_NAME: Windows-MSVC-Qt6
+      BUILD_PLATFORM: official
+      BUILD_TYPE: Release
+      CMAKE_PRESET: windows_msvc_x64
+
+    steps:
+      - name: Checkout source and submodules
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Set up Visual Studio 2022 x64, Java, and vcpkg
+        uses: ./.github/actions/setup-dependencies/windows
+        with:
+          build-type: Release
+          vcvars-arch: amd64
+
+      - name: Install pinned CMake 3.31.6
+        uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3
+        with:
+          cmake-version: "3.31.6"
+
+      - name: Install pinned Qt 6.10.2 for MSVC 2022 x64
+        uses: jurplel/install-qt-action@v4
+        with:
+          aqtversion: "==3.1.*"
+          version: "6.10.2"
+          arch: win64_msvc2022_64
+          modules: qtimageformats qtnetworkauth
+          cache: false
+
+      - name: Verify x64 MSVC toolchain and pinned tools
+        env:
+          EXPECTED_RUNNER_ARCH: ${{ runner.arch }}
+        run: |
+          if ($env:EXPECTED_RUNNER_ARCH -ne "X64" -or -not [Environment]::Is64BitOperatingSystem) {
+            throw "This workflow requires a Windows x64 runner."
+          }
+          if ($env:PROCESSOR_ARCHITECTURE -ne "AMD64") {
+            throw "Expected a 64-bit AMD64 PowerShell process; got $env:PROCESSOR_ARCHITECTURE."
+          }
+          if ($env:VSCMD_ARG_TGT_ARCH -ne "amd64") {
+            throw "MSVC developer environment is not targeting amd64: $env:VSCMD_ARG_TGT_ARCH"
+          }
+          if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
+            throw "The Visual Studio 2022 x64 compiler is not on PATH."
+          }
+          if (-not $env:VCPKG_ROOT -or -not (Test-Path (Join-Path $env:VCPKG_ROOT "scripts/buildsystems/vcpkg.cmake"))) {
+            throw "The repository's vcpkg toolchain is not available."
+          }
+          $cmakeVersion = (& cmake --version | Select-Object -First 1)
+          if ($cmakeVersion -notmatch "3\.31\.6") {
+            throw "Expected pinned CMake 3.31.6, found: $cmakeVersion"
+          }
+          if (-not (Get-Command javac.exe -ErrorAction SilentlyContinue)) {
+            throw "The configured Java 17 JDK (including javac) is unavailable."
+          }
+          Write-Host "Runner architecture: $env:EXPECTED_RUNNER_ARCH"
+          Write-Host $cmakeVersion
+          Write-Host "MSVC target architecture: $env:VSCMD_ARG_TGT_ARCH"
+
+      - name: Configure Visual Studio 2022 x64 Release
+        run: |
+          cmake --preset "$env:CMAKE_PRESET" 2>&1 | Tee-Object -FilePath configure.log
+          $configureExitCode = $LASTEXITCODE
+          if ($configureExitCode -ne 0) {
+            exit $configureExitCode
+          }
+          $cachePath = Join-Path $env:GITHUB_WORKSPACE "build/CMakeCache.txt"
+          if (-not (Test-Path -LiteralPath $cachePath)) {
+            throw "CMake did not create build/CMakeCache.txt."
+          }
+          $cache = Get-Content -LiteralPath $cachePath -Raw
+          $requiredCachePatterns = @(
+            '(?m)^CMAKE_GENERATOR:INTERNAL=Visual Studio 17 2022$',
+            '(?m)^CMAKE_GENERATOR_PLATFORM:INTERNAL=x64$',
+            '(?m)^CMAKE_GENERATOR_TOOLSET:INTERNAL=v143$',
+            '(?m)^VCPKG_TARGET_TRIPLET:STRING=x64-windows$',
+            '(?m)^CMAKE_CONFIGURATION_TYPES:[^=]*=[^\r\n]*Release',
+            '(?m)^Qt6_DIR:PATH=.*6\.10\.2.*msvc2022_64'
+          )
+          foreach ($pattern in $requiredCachePatterns) {
+            if ($cache -notmatch $pattern) {
+              throw "CMake cache did not satisfy the required x64/Release/Qt configuration check: $pattern"
+            }
+          }
+          if ($env:BUILD_TYPE -ne "Release") {
+            throw "BUILD_TYPE must be Release, not $env:BUILD_TYPE."
+          }
+
+      - name: Build Release
+        run: |
+          cmake --build --preset "$env:CMAKE_PRESET" --config "$env:BUILD_TYPE" --parallel 2 2>&1 | Tee-Object -FilePath build.log
+          $buildExitCode = $LASTEXITCODE
+          if ($buildExitCode -ne 0) {
+            exit $buildExitCode
+          }
+
+      - name: Run CTest and report test totals
+        run: |
+          $junitPath = Join-Path $env:GITHUB_WORKSPACE "ctest-results.xml"
+          ctest --preset "$env:CMAKE_PRESET" --build-config "$env:BUILD_TYPE" --output-on-failure --output-junit $junitPath 2>&1 | Tee-Object -FilePath ctest.log
+          $ctestExitCode = $LASTEXITCODE
+          if (-not (Test-Path -LiteralPath $junitPath)) {
+            Write-Error "CTest did not produce its JUnit result file."
+            exit 1
+          }
+          [xml]$junit = Get-Content -LiteralPath $junitPath -Raw
+          $testCases = @($junit.SelectNodes("//testcase"))
+          if ($testCases.Count -eq 0) {
+            Write-Error "CTest reported no test cases."
+            exit 1
+          }
+          $failedCount = 0
+          $skippedCount = 0
+          foreach ($testCase in $testCases) {
+            if ($null -ne $testCase.SelectSingleNode("failure") -or $null -ne $testCase.SelectSingleNode("error")) {
+              $failedCount++
+            } elseif ($null -ne $testCase.SelectSingleNode("skipped")) {
+              $skippedCount++
+            }
+          }
+          $passedCount = $testCases.Count - $failedCount - $skippedCount
+          $summary = @"
+          ## Windows CTest
+          - Total: $($testCases.Count)
+          - Passed: $passedCount
+          - Failed: $failedCount
+          - Skipped: $skippedCount
+          "@
+          Write-Host $summary
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $summary
+          if ($ctestExitCode -ne 0) {
+            exit $ctestExitCode
+          }
+
+      - name: Stage the portable Windows install
+        run: |
+          foreach ($path in @("install", "install-portable")) {
+            if (Test-Path -LiteralPath $path) {
+              Remove-Item -LiteralPath $path -Recurse -Force
+            }
+          }
+          cmake --install build --config "$env:BUILD_TYPE" 2>&1 | Tee-Object -FilePath install.log
+          $installExitCode = $LASTEXITCODE
+          if ($installExitCode -ne 0) {
+            exit $installExitCode
+          }
+          if (-not (Test-Path -LiteralPath "install/VortexLauncher.exe" -PathType Leaf)) {
+            throw "CMake's Release install did not contain VortexLauncher.exe."
+          }
+          New-Item -ItemType Directory -Path "install-portable" -Force | Out-Null
+          Get-ChildItem -LiteralPath "install" -Force | Copy-Item -Destination "install-portable" -Recurse -Force
+          cmake --install build --config "$env:BUILD_TYPE" --prefix "install-portable" --component portable 2>&1 | Tee-Object -FilePath package.log
+          $portableExitCode = $LASTEXITCODE
+          if ($portableExitCode -ne 0) {
+            exit $portableExitCode
+          }
+
+      - name: Validate, package, and clean-run the extracted ZIP
+        run: |
+          ./scripts/package_windows_x64.ps1 -InstallDirectory install-portable -OutputPath VortexLauncher-Windows-x64.zip -BuildType Release -RunSmokeTests 2>&1 | Tee-Object -FilePath package.log -Append
+
+      - name: Record CI testing scope
+        run: |
+          $summary = @"
+          ## Windows x64 package
+          - Package smoke test: extracted release startup, configuration persistence, logs, normal shutdown, and restart.
+          - Interactive GUI testing requires a suitable Windows desktop environment.
+          - Minecraft runtime launch was not tested in CI.
+          "@
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $summary
+
+      - name: Upload validated Windows x64 package
+        uses: actions/upload-artifact@v7
+        with:
+          name: VortexLauncher-Windows-x64
+          path: |
+            VortexLauncher-Windows-x64.zip
+            VortexLauncher-Windows-x64.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: VortexLauncher-Windows-x64-diagnostics-${{ github.run_id }}
+          path: |
+            configure.log
+            build.log
+            ctest.log
+            ctest-results.xml
+            install.log
+            package.log
+            build/Testing/Temporary/LastTest.log
+            build/Testing/Temporary/LastTestsFailed.log
+            ${{ runner.temp }}/VortexLauncher-Windows-x64-clean-test/user-data/logs/*.log
+          if-no-files-found: ignore
+          retention-days: 7

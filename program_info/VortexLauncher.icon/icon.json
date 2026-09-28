@@ -1,0 +1,21 @@
+{
+  "color-space-for-untagged-svg-colors": "display-p3",
+  "fill": { "solid": "extended-gray:0.10000,1.00000" },
+  "groups": [
+    {
+      "layers": [
+        { "image-name": "vortex-symbol.svg", "name": "vortex-symbol", "position": { "scale": 19.28, "translation-in-points": [0, 0] } }
+      ],
+      "shadow": { "kind": "neutral", "opacity": 0.45 },
+      "translucency": { "enabled": true, "value": 0.4 }
+    },
+    {
+      "layers": [
+        { "blend-mode": "normal", "fill": "automatic", "glass": true, "hidden": false, "image-name": "vortex-highlight.svg", "name": "vortex-highlight", "position": { "scale": 19.28, "translation-in-points": [0, 0] } }
+      ],
+      "shadow": { "kind": "neutral", "opacity": 0.45 },
+      "translucency": { "enabled": false, "value": 0.5 }
+    }
+  ],
+  "supported-platforms": { "squares": ["macOS"] }
+}
